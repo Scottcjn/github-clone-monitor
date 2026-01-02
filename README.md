@@ -1,3 +1,5 @@
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![GitHub](https://img.shields.io/badge/GitHub-Monitor-black)](https://github.com/Scottcjn/github-clone-monitor) [![Security](https://img.shields.io/badge/Security-Alerts-red)](https://github.com/Scottcjn/github-clone-monitor)
+
 # GitHub Clone Monitor
 
 **"Who's cloning my weapons-grade code?"**
