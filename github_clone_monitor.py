@@ -30,19 +30,56 @@ CHECK_INTERVAL = 300  # 5 minutes - fast enough to catch them in the act
 STATE_FILE = os.path.expanduser("~/.github_clone_state.json")
 
 def get_clone_stats(repo):
-    """Fetch clone stats - see who's watching"""
+    """Fetch clone stats - see who's watching
+
+    The traffic API only ever reports the last 14 days, and it hands back a
+    per-day breakdown alongside the window total. We keep that breakdown: the
+    window total on its own goes *down* as old days age out, so it cannot be
+    used to spot new clones.
+    """
     url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo}/traffic/clones"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     try:
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            return {"count": data["count"], "uniques": data["uniques"]}
+            return {
+                "count": data.get("count", 0),
+                "uniques": data.get("uniques", 0),
+                "days": {
+                    day["timestamp"]: {
+                        "count": day.get("count", 0),
+                        "uniques": day.get("uniques", 0),
+                    }
+                    for day in data.get("clones", [])
+                    if day.get("timestamp")
+                },
+            }
         elif resp.status_code == 401:
             print("  [!] Bad token - the glowies changed your password?")
+        elif resp.status_code == 403:
+            print(f"  [!] Rate limited on {repo} - backing off, baseline kept")
+        else:
+            print(f"  [!] {repo}: HTTP {resp.status_code} - baseline kept")
     except Exception as e:
         print(f"  [!] Error fetching {repo}: {e}")
     return None
+
+
+def new_clones_since(previous, current):
+    """New clones between two sweeps, counted per day.
+
+    Days are compared one at a time and only upwards. A day that has left the
+    14-day window contributes nothing instead of subtracting itself from the
+    total, which is what let real clones hide behind an expiring busy day.
+    """
+    old_days = (previous or {}).get("days") or {}
+    new_count = new_uniques = 0
+    for stamp, today in ((current or {}).get("days") or {}).items():
+        was = old_days.get(stamp, {})
+        new_count += max(0, today.get("count", 0) - was.get("count", 0))
+        new_uniques += max(0, today.get("uniques", 0) - was.get("uniques", 0))
+    return new_count, new_uniques
 
 def load_state():
     """Load previous state - remember who was here before"""
@@ -82,21 +119,32 @@ def check_repos():
 
     for repo in REPOS:
         stats = get_clone_stats(repo)
-        if stats:
-            new_state[repo] = stats
-
+        if stats is None:
+            # A blip must not erase what we knew. Dropping the repo here would
+            # make the next successful sweep look like a first sweep, and a
+            # first sweep never alerts - so the clones in between would vanish.
             if repo in state:
-                old_count = state[repo]["count"]
-                new_count = stats["count"]
-                diff = new_count - old_count
+                new_state[repo] = state[repo]
+            print(f"  {repo}: no data this sweep (baseline kept)")
+            continue
 
-                if diff > 0:
-                    total_new_clones += diff
-                    alert(f"{repo}: +{diff} new clones! They're onto you! (Total: {new_count})")
-                else:
-                    print(f"  {repo}: {new_count} clones (quiet... too quiet)")
+        new_state[repo] = stats
+        previous = state.get(repo)
+
+        if previous is None:
+            print(f"  {repo}: {stats['count']} clones ({stats['uniques']} unique) [first sweep]")
+        elif not previous.get("days"):
+            # State written by an older version has no per-day detail, so there
+            # is nothing honest to compare against. Re-baseline, do not alert.
+            print(f"  {repo}: {stats['count']} clones (14-day) [baseline rebuilt]")
+        else:
+            diff, diff_uniques = new_clones_since(previous, stats)
+            if diff > 0:
+                total_new_clones += diff
+                alert(f"{repo}: +{diff} new clones ({diff_uniques} unique)! "
+                      f"They're onto you! (14-day total: {stats['count']})")
             else:
-                print(f"  {repo}: {stats['count']} clones ({stats['uniques']} unique) [first sweep]")
+                print(f"  {repo}: {stats['count']} clones in 14 days (quiet... too quiet)")
 
     save_state(new_state)
 
