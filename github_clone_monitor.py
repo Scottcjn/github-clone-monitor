@@ -8,6 +8,7 @@ Built on Christmas Day 2025 when the glowies came for my repos
 
 import json
 import os
+import subprocess
 import time
 import requests
 from datetime import datetime
@@ -99,10 +100,17 @@ def alert(message):
     print(f"  GLOWIE ALERT: {message}")
     print(f"{'='*60}\n")
 
-    # Desktop notification (Linux)
+    # Desktop notification (Linux) - invoked as a list so the repo/message
+    # text is passed as arguments, never interpolated into a shell string.
     try:
-        os.system(f'notify-send "GLOWIE ALERT" "{message}" 2>/dev/null')
-    except:
+        subprocess.run(
+            ["notify-send", "GLOWIE ALERT", message],
+            timeout=5,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
     # Terminal bell - wake up!
