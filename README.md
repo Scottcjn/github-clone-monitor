@@ -21,6 +21,21 @@ Fun fact: The PowerPC G4 was classified as a **weapon** under US export controls
 - State persistence between runs
 - 5-minute check interval (configurable)
 
+## How new clones are counted
+
+GitHub's traffic API only reports the **last 14 days**, and its window total
+falls whenever an old day ages out. Comparing those totals between sweeps would
+subtract expiring clones from arriving ones, so a busy day rolling off the back
+of the window silently cancels out real activity at the front.
+
+The monitor therefore compares the API's **per-day breakdown**, one day at a
+time and only upwards. A day that has left the window contributes nothing
+instead of hiding new clones behind it.
+
+Sweeps that fail (rate limit, timeout, 5xx) keep the previous baseline rather
+than dropping the repo, so a blip cannot turn the next sweep into a silent
+"first sweep".
+
 ## Installation
 
 ```bash
@@ -52,16 +67,16 @@ nohup python3 github_clone_monitor.py > clone_alerts.log 2>&1 &
 ## Sample Output
 
 ```
-[2025-12-25 09:15:00] Checking clone stats...
+[2025-12-25 09:15:00] Scanning for glowie activity...
 
-==================================================
-  ALERT: rust-ppc-tiger: +3 new clones! (Total: 98)
-==================================================
+============================================================
+  GLOWIE ALERT: rust-ppc-tiger: +3 new clones (2 unique)! They're onto you! (14-day total: 98)
+============================================================
 
-  Rustchain: 71 clones (no change)
-  exo: 84 clones (no change)
+  Rustchain: 71 clones in 14 days (quiet... too quiet)
+  exo: 84 clones in 14 days (quiet... too quiet)
 
-  TOTAL NEW CLONES: +3
+  TOTAL GLOWIE CLONES: +3
 ```
 
 ## The Glowie Hypothesis
