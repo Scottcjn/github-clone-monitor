@@ -232,3 +232,46 @@ def test_state_from_an_older_version_rebaselines_without_alerting(tmp_path, monk
     assert alerts == []
     assert "baseline rebuilt" in capsys.readouterr().out
     assert monitor.load_state() == {"alpha": after}
+
+
+def test_alert_runs_notify_send_without_a_shell(monkeypatch, capsys):
+    """The alert message must never be interpolated into a shell string.
+
+    The message contains the repo name, which is attacker-influenced (it is
+    derived from the repo list / GitHub API). If it were run through a shell a
+    message like `repo" ; touch /tmp/pwned ; echo "` would execute an arbitrary
+    command. subprocess.run with a list argument passes the message as a single
+    argv element, so nothing can be interpreted as shell syntax.
+    """
+    calls = []
+
+    def fake_run(args, timeout, check, stdout, stderr):
+        calls.append({"args": args, "timeout": timeout, "check": check})
+        return object()
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+
+    hostile_message = 'unsafe" ; touch /tmp/pwned_glowie ; echo "'
+    monitor.alert(hostile_message)
+
+    assert len(calls) == 1
+    argv = calls[0]["args"]
+    assert argv[0] == "notify-send"
+    # The whole hostile string survives as ONE argument; no shell split it.
+    assert argv[-1] == hostile_message
+    assert calls[0]["timeout"] == 5
+    assert calls[0]["check"] is False
+    # The injected command was never executed.
+    import os
+    assert not os.path.exists("/tmp/pwned_glowie")
+
+
+def test_alert_swallows_missing_notify_send(monkeypatch, capsys):
+    """alert() must not crash when notify-send is absent (headless boxes)."""
+    def boom(*a, **k):
+        raise FileNotFoundError
+    monkeypatch.setattr(monitor.subprocess, "run", boom)
+    # Should not raise
+    monitor.alert("quiet host")
+    out = capsys.readouterr().out
+    assert "GLOWIE ALERT" in out  # terminal message still printed
